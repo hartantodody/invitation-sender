@@ -11,14 +11,19 @@ import { buildGuestQueryParam } from "@/lib/invitation-utils"
 
 export const AUTH_REQUIRED_ERROR = "AUTH_REQUIRED"
 
-const SETTINGS_COLUMNS = "id,user_id,base_url,opening_text,closing_text,created_at,updated_at"
-const GUEST_COLUMNS = "id,user_id,name,phone,query_param,shift,status,sent_at,notes,created_at,updated_at"
+const SETTINGS_COLUMNS =
+  "id,user_id,base_url,opening_text,closing_text,opening_text_en,closing_text_en,created_at,updated_at"
+const GUEST_COLUMNS =
+  "id,user_id,name,phone,guest_from,query_param,shift,status,sent_at,notes,created_at,updated_at"
 
 const defaultInvitationSettings: InvitationSettings = {
   baseUrl: "https://acara-keluarga.example.com/invitation",
   openingText:
     "Assalamu'alaikum. Dengan penuh kebahagiaan, kami mengundang Bapak/Ibu/Saudara/i untuk menghadiri acara keluarga kami.",
   closingText: "Terima kasih atas doa dan kehadirannya. Wassalamu'alaikum.",
+  openingTextEn:
+    "We are delighted to invite you to join our special family celebration. Your presence means a lot to us.",
+  closingTextEn: "Thank you for your prayers and presence.",
 }
 
 function mapSettingsRow(row: InvitationSettingsRow): InvitationSettings {
@@ -26,6 +31,8 @@ function mapSettingsRow(row: InvitationSettingsRow): InvitationSettings {
     baseUrl: row.base_url,
     openingText: row.opening_text,
     closingText: row.closing_text,
+    openingTextEn: row.opening_text_en || row.opening_text,
+    closingTextEn: row.closing_text_en || row.closing_text,
   }
 }
 
@@ -36,6 +43,7 @@ function mapGuestRow(row: GuestRow): Guest {
     id: row.id,
     name: row.name,
     phone: row.phone,
+    guestFrom: row.guest_from,
     queryParam: row.query_param,
     shift: shift as Guest["shift"],
     status: row.status,
@@ -44,13 +52,24 @@ function mapGuestRow(row: GuestRow): Guest {
   }
 }
 
-function normalizeGuestFormValues(values: GuestFormInput) {
+function normalizeGuestFormValues(values: GuestFormInput, usedQueryParams?: Set<string>) {
   const normalizedName = values.name.trim()
-  const queryParam = buildGuestQueryParam(normalizedName) || "guest"
+  const baseQueryParam = buildGuestQueryParam(normalizedName) || "guest"
+  let queryParam = baseQueryParam
+
+  if (usedQueryParams) {
+    let suffix = 2
+    while (usedQueryParams.has(queryParam)) {
+      queryParam = `${baseQueryParam}-${suffix}`
+      suffix += 1
+    }
+    usedQueryParams.add(queryParam)
+  }
 
   return {
     name: normalizedName,
     phone: values.phone.trim(),
+    guest_from: values.guestFrom.trim(),
     query_param: queryParam,
     shift: Number(values.shift) as GuestRow["shift"],
     notes: values.notes.trim() || null,
@@ -86,6 +105,8 @@ export async function ensureInvitationSettings(
       base_url: defaultInvitationSettings.baseUrl,
       opening_text: defaultInvitationSettings.openingText,
       closing_text: defaultInvitationSettings.closingText,
+      opening_text_en: defaultInvitationSettings.openingTextEn,
+      closing_text_en: defaultInvitationSettings.closingTextEn,
     })
     .select(SETTINGS_COLUMNS)
     .single<InvitationSettingsRow>()
@@ -108,6 +129,8 @@ export async function upsertInvitationSettings(
         base_url: settings.baseUrl.trim(),
         opening_text: settings.openingText.trim(),
         closing_text: settings.closingText.trim(),
+        opening_text_en: settings.openingTextEn.trim() || settings.openingText.trim(),
+        closing_text_en: settings.closingTextEn.trim() || settings.closingText.trim(),
       },
       {
         onConflict: "user_id",
@@ -155,6 +178,42 @@ export async function createGuest(
   if (error) throw error
 
   return mapGuestRow(data)
+}
+
+export async function createGuestsBulk(
+  supabase: SupabaseClient,
+  userId: string,
+  values: GuestFormInput[]
+): Promise<Guest[]> {
+  if (values.length === 0) return []
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("guests")
+    .select("query_param")
+    .eq("user_id", userId)
+    .returns<Array<Pick<GuestRow, "query_param">>>()
+
+  if (existingError) throw existingError
+
+  const usedQueryParams = new Set((existingRows ?? []).map((row) => row.query_param))
+  const payload = values.map((value) => normalizeGuestFormValues(value, usedQueryParams))
+
+  const { data, error } = await supabase
+    .from("guests")
+    .insert(
+      payload.map((item) => ({
+        user_id: userId,
+        ...item,
+        status: "pending",
+        sent_at: null,
+      }))
+    )
+    .select(GUEST_COLUMNS)
+    .returns<GuestRow[]>()
+
+  if (error) throw error
+
+  return (data ?? []).map(mapGuestRow)
 }
 
 export async function updateGuestById(

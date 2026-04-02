@@ -45,6 +45,7 @@ export function GuestCard({
         </div>
         <div className="space-y-1 text-sm text-muted-foreground">
           <p>{guest.phone}</p>
+          <p className="text-xs">Guest dari: {guest.guestFrom}</p>
           <p className="inline-flex items-center gap-1.5 text-xs">
             <TimerIcon className="size-3.5" />
             {getGuestShiftLabel(guest.shift)}

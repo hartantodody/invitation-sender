@@ -22,12 +22,13 @@ import {
   upsertInvitationSettings,
 } from "@/lib/supabase/data"
 import { hasSupabasePublicEnv, missingSupabaseEnvMessage } from "@/lib/supabase/env"
-import type { Guest, InvitationSettings } from "@/lib/types"
+import type { Guest, InvitationLanguage, InvitationSettings } from "@/lib/types"
 
 const fallbackPreviewGuest: Guest = {
   id: "preview-guest",
   name: "Contoh Tamu Keluarga",
   phone: "0812-0000-0000",
+  guestFrom: "Keluarga Inti",
   queryParam: "sample-family-guest",
   shift: "1",
   status: "pending",
@@ -39,6 +40,9 @@ const fallbackSettings: InvitationSettings = {
   openingText:
     "Assalamu'alaikum. Dengan penuh kebahagiaan, kami mengundang Bapak/Ibu/Saudara/i untuk menghadiri acara keluarga kami.",
   closingText: "Terima kasih atas doa dan kehadirannya. Wassalamu'alaikum.",
+  openingTextEn:
+    "We are delighted to invite you to join our special family celebration. Your presence means a lot to us.",
+  closingTextEn: "Thank you for your prayers and presence.",
 }
 
 export default function AdminSettingsPage() {
@@ -49,6 +53,7 @@ export default function AdminSettingsPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [draftSettings, setDraftSettings] = useState<InvitationSettings>(fallbackSettings)
   const [previewGuest, setPreviewGuest] = useState<Guest>(fallbackPreviewGuest)
+  const [previewLanguage, setPreviewLanguage] = useState<InvitationLanguage>("id")
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -90,8 +95,8 @@ export default function AdminSettingsPage() {
   }, [loadPageData])
 
   const previewMessage = useMemo(
-    () => buildInvitationMessage(draftSettings, previewGuest),
-    [draftSettings, previewGuest]
+    () => buildInvitationMessage(draftSettings, previewGuest, previewLanguage),
+    [draftSettings, previewGuest, previewLanguage]
   )
 
   const handleSave = async () => {
@@ -145,6 +150,8 @@ export default function AdminSettingsPage() {
             onSave={handleSave}
             previewGuestName={previewGuest.name}
             previewMessage={previewMessage}
+            previewLanguage={previewLanguage}
+            onPreviewLanguageChange={setPreviewLanguage}
             isSaving={isSaving}
           />
         )}

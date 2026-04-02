@@ -1,4 +1,4 @@
-import type { Guest, InvitationSettings } from "@/lib/types"
+import type { Guest, InvitationLanguage, InvitationSettings } from "@/lib/types"
 
 export function buildGuestQueryParam(name: string): string {
   return name
@@ -11,7 +11,12 @@ export function buildGuestQueryParam(name: string): string {
     .replace(/^-|-$/g, "")
 }
 
-export function buildInvitationUrl(baseUrl: string, queryParam: string, shift: Guest["shift"]): string {
+export function buildInvitationUrl(
+  baseUrl: string,
+  queryParam: string,
+  shift: Guest["shift"],
+  language: InvitationLanguage = "id"
+): string {
   const trimmedBaseUrl = baseUrl.trim()
   const trimmedQueryParam = queryParam.trim()
 
@@ -20,13 +25,13 @@ export function buildInvitationUrl(baseUrl: string, queryParam: string, shift: G
 
   try {
     const url = new URL(trimmedBaseUrl)
-    url.searchParams.set("lang", "id")
+    url.searchParams.set("lang", language)
     url.searchParams.set("to", trimmedQueryParam)
     url.searchParams.set("shift", shift)
     return url.toString()
   } catch {
     const params = new URLSearchParams({
-      lang: "id",
+      lang: language,
       to: trimmedQueryParam,
       shift,
     })
@@ -37,11 +42,16 @@ export function buildInvitationUrl(baseUrl: string, queryParam: string, shift: G
 
 export function buildInvitationMessage(
   settings: InvitationSettings,
-  guest: Pick<Guest, "queryParam" | "shift">
+  guest: Pick<Guest, "queryParam" | "shift">,
+  language: InvitationLanguage = "id"
 ): string {
-  const invitationUrl = buildInvitationUrl(settings.baseUrl, guest.queryParam, guest.shift)
+  const openingText =
+    language === "en" ? settings.openingTextEn.trim() || settings.openingText.trim() : settings.openingText.trim()
+  const closingText =
+    language === "en" ? settings.closingTextEn.trim() || settings.closingText.trim() : settings.closingText.trim()
+  const invitationUrl = buildInvitationUrl(settings.baseUrl, guest.queryParam, guest.shift, language)
 
-  return [settings.openingText.trim(), invitationUrl, settings.closingText.trim()]
+  return [openingText, invitationUrl, closingText]
     .filter(Boolean)
     .join("\n\n")
 }

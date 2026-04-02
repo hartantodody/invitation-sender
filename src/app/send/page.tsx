@@ -15,6 +15,13 @@ import { StatsSummary } from "@/components/stats-summary"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   buildInvitationMessage,
   buildWhatsAppUrl,
   copyToClipboard,
@@ -29,7 +36,7 @@ import {
   markGuestAsSent,
 } from "@/lib/supabase/data"
 import { hasSupabasePublicEnv, missingSupabaseEnvMessage } from "@/lib/supabase/env"
-import type { Guest, InvitationSettings } from "@/lib/types"
+import type { Guest, InvitationLanguage, InvitationSettings } from "@/lib/types"
 
 type SendFilter = "all" | "pending" | "sent"
 
@@ -52,6 +59,7 @@ export default function SendPage() {
   const [markingGuestId, setMarkingGuestId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<SendFilter>("all")
+  const [sendLanguage, setSendLanguage] = useState<InvitationLanguage>("id")
   const [lastCopiedGuestId, setLastCopiedGuestId] = useState<string | null>(null)
 
   const loadPageData = useCallback(async () => {
@@ -98,7 +106,8 @@ export default function SendPage() {
     const normalizedQuery = searchQuery.trim().toLowerCase()
 
     return guests.filter((guest) => {
-      const matchesSearch = guest.name.toLowerCase().includes(normalizedQuery)
+      const searchableText = `${guest.name} ${guest.phone} ${guest.guestFrom}`.toLowerCase()
+      const matchesSearch = searchableText.includes(normalizedQuery)
       if (!matchesSearch) return false
 
       if (statusFilter === "all") return true
@@ -114,7 +123,7 @@ export default function SendPage() {
       return
     }
 
-    const message = buildInvitationMessage(settings, guest)
+    const message = buildInvitationMessage(settings, guest, sendLanguage)
     const copied = await copyToClipboard(message)
 
     if (!copied) {
@@ -136,7 +145,7 @@ export default function SendPage() {
       return
     }
 
-    const message = buildInvitationMessage(settings, guest)
+    const message = buildInvitationMessage(settings, guest, sendLanguage)
     const whatsappUrl = buildWhatsAppUrl(guest.phone, message)
     window.open(whatsappUrl, "_blank", "noopener,noreferrer")
   }
@@ -175,7 +184,29 @@ export default function SendPage() {
         <StatsSummary total={totalGuests} sent={sentCount} pending={pendingCount} />
 
         <div className="space-y-2.5">
-          <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Cari nama tamu..." />
+          <SearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Cari nama, nomor, atau guest dari..."
+          />
+
+          <div className="rounded-xl border border-border/80 bg-[#f7faf7] px-3 py-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-foreground">Bahasa Pesan</p>
+              <Select
+                value={sendLanguage}
+                onValueChange={(value) => setSendLanguage(value as InvitationLanguage)}
+              >
+                <SelectTrigger className="h-9 min-w-32 rounded-lg bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="id">Indonesia</SelectItem>
+                  <SelectItem value="en">English</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
 
           <div className="grid grid-cols-3 rounded-xl border border-border/80 bg-[#edf4ee] p-1">
             {sendFilterOptions.map((option) => (

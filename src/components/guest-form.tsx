@@ -24,6 +24,7 @@ type GuestFormProps = {
 const defaultValues: GuestFormInput = {
   name: "",
   phone: "",
+  guestFrom: "",
   shift: "1",
   notes: "",
 }
@@ -35,6 +36,7 @@ function validate(values: GuestFormInput): FormErrors {
 
   if (!values.name.trim()) errors.name = "Nama wajib diisi."
   if (!values.phone.trim()) errors.phone = "Nomor wajib diisi."
+  if (!values.guestFrom.trim()) errors.guestFrom = "Kolom ini wajib diisi."
   if (!values.shift) errors.shift = "Shift wajib dipilih."
 
   return errors
@@ -88,6 +90,19 @@ export function GuestForm({
           aria-invalid={errors.phone ? true : undefined}
         />
         {errors.phone ? <p className="text-xs text-destructive">{errors.phone}</p> : null}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="guest-from">Guest dari siapa?</Label>
+        <Input
+          id="guest-from"
+          value={values.guestFrom}
+          onChange={(event) => setValues((prev) => ({ ...prev, guestFrom: event.target.value }))}
+          className="h-11 rounded-xl bg-white"
+          placeholder="Contoh: Keluarga Dody"
+          aria-invalid={errors.guestFrom ? true : undefined}
+        />
+        {errors.guestFrom ? <p className="text-xs text-destructive">{errors.guestFrom}</p> : null}
       </div>
 
       <div className="space-y-2">
