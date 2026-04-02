@@ -1,20 +1,24 @@
+import { PlusIcon, Trash2Icon } from "lucide-react"
+
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import type { InvitationLanguage, InvitationSettings } from "@/lib/types"
+import type { InvitationLanguage, InvitationMessageTemplate, InvitationSettings } from "@/lib/types"
+
+type TemplatePatch = Partial<
+  Pick<InvitationMessageTemplate, "languageCode" | "languageLabel" | "openingText" | "closingText">
+>
 
 type SettingsFormProps = {
   settings: InvitationSettings
   onChange: (settings: InvitationSettings) => void
+  onTemplateChange: (index: number, patch: TemplatePatch) => void
+  onAddLanguage: () => void
+  onRemoveLanguage: (index: number) => void
   onSave: () => void
   previewGuestName: string
   previewMessage: string
@@ -26,6 +30,9 @@ type SettingsFormProps = {
 export function SettingsForm({
   settings,
   onChange,
+  onTemplateChange,
+  onAddLanguage,
+  onRemoveLanguage,
   onSave,
   previewGuestName,
   previewMessage,
@@ -33,14 +40,16 @@ export function SettingsForm({
   onPreviewLanguageChange,
   isSaving = false,
 }: SettingsFormProps) {
+  const previewLanguageOptions = settings.templates.filter((template) => template.languageCode.trim())
+
   return (
     <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-start lg:gap-4 lg:space-y-0">
-      <Card className="rounded-2xl border border-border/80 bg-white py-0 shadow-none">
-        <CardHeader className="px-4 py-4">
-          <CardTitle>Pengaturan Undangan</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4 px-4 pb-4">
-          <div className="space-y-2">
+      <div className="space-y-4">
+        <Card className="rounded-2xl border border-border/80 bg-white py-0 shadow-none">
+          <CardHeader className="px-4 py-4">
+            <CardTitle>Pengaturan Umum</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 px-4 pb-4">
             <Label htmlFor="base-url">URL dasar undangan</Label>
             <Input
               id="base-url"
@@ -54,82 +63,129 @@ export function SettingsForm({
               className="h-11 rounded-xl bg-white"
               placeholder="https://acara-keluarga.example.com/invitation"
             />
-          </div>
+          </CardContent>
+        </Card>
 
-          <div className="space-y-2">
-            <Label htmlFor="opening-text">Teks pembuka</Label>
-            <Textarea
-              id="opening-text"
-              value={settings.openingText}
-              onChange={(event) =>
-                onChange({
-                  ...settings,
-                  openingText: event.target.value,
-                })
-              }
-              className="min-h-28 rounded-xl bg-white"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="closing-text">Teks penutup</Label>
-            <Textarea
-              id="closing-text"
-              value={settings.closingText}
-              onChange={(event) =>
-                onChange({
-                  ...settings,
-                  closingText: event.target.value,
-                })
-              }
-              className="min-h-24 rounded-xl bg-white"
-            />
-          </div>
-
-          <div className="rounded-xl border border-border/70 bg-[#f7faf7] px-3 py-3">
-            <p className="mb-2 text-sm font-medium text-foreground">Template Bahasa Inggris</p>
-            <div className="space-y-3">
-              <div className="space-y-2">
-                <Label htmlFor="opening-text-en">Opening text (EN)</Label>
-                <Textarea
-                  id="opening-text-en"
-                  value={settings.openingTextEn}
-                  onChange={(event) =>
-                    onChange({
-                      ...settings,
-                      openingTextEn: event.target.value,
-                    })
-                  }
-                  className="min-h-24 rounded-xl bg-white"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="closing-text-en">Closing text (EN)</Label>
-                <Textarea
-                  id="closing-text-en"
-                  value={settings.closingTextEn}
-                  onChange={(event) =>
-                    onChange({
-                      ...settings,
-                      closingTextEn: event.target.value,
-                    })
-                  }
-                  className="min-h-20 rounded-xl bg-white"
-                />
-              </div>
+        <Card className="rounded-2xl border border-border/80 bg-white py-0 shadow-none">
+          <CardHeader className="px-4 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>Template Pesan per Bahasa</CardTitle>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg bg-white"
+                onClick={onAddLanguage}
+              >
+                <PlusIcon className="size-4" />
+                Tambah Bahasa
+              </Button>
             </div>
-          </div>
+          </CardHeader>
+          <CardContent className="space-y-3 px-4 pb-4">
+            <Accordion
+              type="multiple"
+              className="space-y-2"
+              defaultValue={settings.templates.map((template, index) => `${template.id}-${index}`)}
+            >
+              {settings.templates.map((template, index) => (
+                <AccordionItem
+                  key={`${template.id}-${index}`}
+                  value={`${template.id}-${index}`}
+                  className="overflow-hidden rounded-xl border border-border/80 bg-[#f7faf7] px-3"
+                >
+                  <AccordionTrigger className="py-3 text-sm no-underline hover:no-underline">
+                    <div className="space-y-0.5 text-left">
+                      <p className="font-medium text-foreground">{template.languageLabel || `Bahasa ${index + 1}`}</p>
+                      <p className="text-xs text-muted-foreground">{template.languageCode || "kode-bahasa"}</p>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="space-y-3 pb-3">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor={`language-label-${index}`}>Nama Bahasa</Label>
+                        <Input
+                          id={`language-label-${index}`}
+                          value={template.languageLabel}
+                          onChange={(event) =>
+                            onTemplateChange(index, {
+                              languageLabel: event.target.value,
+                            })
+                          }
+                          className="h-10 rounded-lg bg-white"
+                          placeholder="Indonesia"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`language-code-${index}`}>Kode Bahasa</Label>
+                        <Input
+                          id={`language-code-${index}`}
+                          value={template.languageCode}
+                          onChange={(event) =>
+                            onTemplateChange(index, {
+                              languageCode: event.target.value,
+                            })
+                          }
+                          className="h-10 rounded-lg bg-white lowercase"
+                          placeholder="id"
+                        />
+                      </div>
+                    </div>
 
-          <Button
-            className="h-11 w-full rounded-xl bg-[#2f6f44] hover:bg-[#2a663e]"
-            onClick={onSave}
-            disabled={isSaving}
-          >
-            {isSaving ? "Menyimpan..." : "Simpan Pengaturan"}
-          </Button>
-        </CardContent>
-      </Card>
+                    <div className="space-y-2">
+                      <Label htmlFor={`opening-text-${index}`}>Teks pembuka</Label>
+                      <Textarea
+                        id={`opening-text-${index}`}
+                        value={template.openingText}
+                        onChange={(event) =>
+                          onTemplateChange(index, {
+                            openingText: event.target.value,
+                          })
+                        }
+                        className="min-h-24 rounded-xl bg-white"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor={`closing-text-${index}`}>Teks penutup</Label>
+                      <Textarea
+                        id={`closing-text-${index}`}
+                        value={template.closingText}
+                        onChange={(event) =>
+                          onTemplateChange(index, {
+                            closingText: event.target.value,
+                          })
+                        }
+                        className="min-h-20 rounded-xl bg-white"
+                      />
+                    </div>
+
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9 rounded-lg bg-white text-destructive hover:text-destructive"
+                        onClick={() => onRemoveLanguage(index)}
+                        disabled={settings.templates.length <= 1}
+                      >
+                        <Trash2Icon className="size-4" />
+                        Hapus Bahasa
+                      </Button>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+
+            <Button
+              className="h-11 w-full rounded-xl bg-[#2f6f44] hover:bg-[#2a663e]"
+              onClick={onSave}
+              disabled={isSaving}
+            >
+              {isSaving ? "Menyimpan..." : "Simpan Pengaturan"}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card className="rounded-2xl border border-border/80 bg-[#f7faf7] py-0 shadow-none lg:sticky lg:top-6">
         <CardHeader className="px-4 py-4">
@@ -143,8 +199,11 @@ export function SettingsForm({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="id">Indonesia</SelectItem>
-                <SelectItem value="en">English</SelectItem>
+                {previewLanguageOptions.map((template) => (
+                  <SelectItem key={template.id} value={template.languageCode}>
+                    {template.languageLabel}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

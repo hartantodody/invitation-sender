@@ -8,7 +8,7 @@ export function getSupabaseErrorMessage(error: unknown, fallbackMessage: string)
       normalized.includes("schema cache")
 
     if (isMissingColumnError) {
-      return "Schema Supabase belum versi terbaru. Jalankan ulang SQL migration terbaru (kolom: guest_from, opening_text_en, closing_text_en)."
+      return "Schema Supabase belum versi terbaru. Jalankan ulang SQL migration terbaru (kolom: guest_from + tabel invitation_message_templates)."
     }
 
     return error.message

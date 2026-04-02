@@ -103,6 +103,18 @@ export default function SendPage() {
     void loadPageData()
   }, [loadPageData])
 
+  useEffect(() => {
+    if (!settings?.templates.length) return
+
+    const hasSelectedLanguage = settings.templates.some(
+      (template) => template.languageCode === sendLanguage
+    )
+
+    if (!hasSelectedLanguage) {
+      setSendLanguage(settings.templates[0].languageCode)
+    }
+  }, [sendLanguage, settings])
+
   const totalGuests = guests.length
   const sentCount = guests.filter((guest) => guest.status === "sent").length
   const pendingCount = totalGuests - sentCount
@@ -116,6 +128,11 @@ export default function SendPage() {
 
     return Array.from(uniqueGuestFrom).sort((a, b) => a.localeCompare(b, "id"))
   }, [guests])
+
+  const sendLanguageOptions = useMemo(
+    () => settings?.templates.filter((template) => template.languageCode.trim()) ?? [],
+    [settings]
+  )
 
   const filteredGuests = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase()
@@ -219,14 +236,17 @@ export default function SendPage() {
                 <p className="text-sm font-medium text-foreground">Bahasa Pesan</p>
                 <Select
                   value={sendLanguage}
-                  onValueChange={(value) => setSendLanguage(value as InvitationLanguage)}
+                  onValueChange={setSendLanguage}
                 >
                   <SelectTrigger className="h-9 min-w-32 rounded-lg bg-white">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="id">Indonesia</SelectItem>
-                    <SelectItem value="en">English</SelectItem>
+                    {sendLanguageOptions.map((template) => (
+                      <SelectItem key={template.id} value={template.languageCode}>
+                        {template.languageLabel}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

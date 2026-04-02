@@ -45,13 +45,22 @@ export function buildInvitationMessage(
   guest: Pick<Guest, "queryParam" | "shift">,
   language: InvitationLanguage = "id"
 ): string {
-  const openingText =
-    language === "en" ? settings.openingTextEn.trim() || settings.openingText.trim() : settings.openingText.trim()
-  const closingText =
-    language === "en" ? settings.closingTextEn.trim() || settings.closingText.trim() : settings.closingText.trim()
-  const invitationUrl = buildInvitationUrl(settings.baseUrl, guest.queryParam, guest.shift, language)
+  const normalizedLanguage = language.trim().toLowerCase()
+  const selectedTemplate =
+    settings.templates.find((template) => template.languageCode === normalizedLanguage) ||
+    settings.templates.find((template) => template.languageCode === "id") ||
+    settings.templates[0]
 
-  return [openingText, invitationUrl, closingText]
+  if (!selectedTemplate) return ""
+
+  const invitationUrl = buildInvitationUrl(
+    settings.baseUrl,
+    guest.queryParam,
+    guest.shift,
+    selectedTemplate.languageCode
+  )
+
+  return [selectedTemplate.openingText.trim(), invitationUrl, selectedTemplate.closingText.trim()]
     .filter(Boolean)
     .join("\n\n")
 }
@@ -69,13 +78,15 @@ export function formatPhoneForWhatsApp(phone: string | null | undefined): string
 
 export function buildWhatsAppUrl(phone: string | null | undefined, message: string): string {
   const formattedPhone = formatPhoneForWhatsApp(phone)
-  const encodedMessage = encodeURIComponent(message)
+  const url = new URL(formattedPhone ? `https://api.whatsapp.com/send` : "https://api.whatsapp.com/send")
+  const normalizedMessage = message.normalize("NFC").replace(/\uFFFD/g, "")
 
-  if (!formattedPhone) {
-    return `https://wa.me/?text=${encodedMessage}`
+  if (formattedPhone) {
+    url.searchParams.set("phone", formattedPhone)
   }
+  url.searchParams.set("text", normalizedMessage)
 
-  return `https://wa.me/${formattedPhone}?text=${encodedMessage}`
+  return url.toString()
 }
 
 export async function copyToClipboard(text: string): Promise<boolean> {

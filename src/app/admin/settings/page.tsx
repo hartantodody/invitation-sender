@@ -23,7 +23,12 @@ import {
 } from "@/lib/supabase/data"
 import { hasSupabasePublicEnv, missingSupabaseEnvMessage } from "@/lib/supabase/env"
 import { getSupabaseErrorMessage } from "@/lib/supabase/error"
-import type { Guest, InvitationLanguage, InvitationSettings } from "@/lib/types"
+import type {
+  Guest,
+  InvitationLanguage,
+  InvitationMessageTemplate,
+  InvitationSettings,
+} from "@/lib/types"
 
 const fallbackPreviewGuest: Guest = {
   id: "preview-guest",
@@ -38,12 +43,46 @@ const fallbackPreviewGuest: Guest = {
 
 const fallbackSettings: InvitationSettings = {
   baseUrl: "https://acara-keluarga.example.com/invitation",
-  openingText:
-    "Assalamu'alaikum. Dengan penuh kebahagiaan, kami mengundang Bapak/Ibu/Saudara/i untuk menghadiri acara keluarga kami.",
-  closingText: "Terima kasih atas doa dan kehadirannya. Wassalamu'alaikum.",
-  openingTextEn:
-    "We are delighted to invite you to join our special family celebration. Your presence means a lot to us.",
-  closingTextEn: "Thank you for your prayers and presence.",
+  templates: [
+    {
+      id: "fallback-id",
+      languageCode: "id",
+      languageLabel: "Indonesia",
+      openingText:
+        "Assalamu'alaikum. Dengan penuh kebahagiaan, kami mengundang Bapak/Ibu/Saudara/i untuk menghadiri acara keluarga kami.",
+      closingText: "Terima kasih atas doa dan kehadirannya. Wassalamu'alaikum.",
+    },
+    {
+      id: "fallback-en",
+      languageCode: "en",
+      languageLabel: "English",
+      openingText:
+        "We are delighted to invite you to join our special family celebration. Your presence means a lot to us.",
+      closingText: "Thank you for your prayers and presence.",
+    },
+  ],
+}
+
+function resolvePreviewLanguage(settings: InvitationSettings, currentLanguage: string | null) {
+  const fallbackLanguage = settings.templates[0]?.languageCode ?? "id"
+
+  if (!currentLanguage) return fallbackLanguage
+  if (settings.templates.some((template) => template.languageCode === currentLanguage)) {
+    return currentLanguage
+  }
+
+  return fallbackLanguage
+}
+
+function buildNextLanguageCode(templates: InvitationMessageTemplate[]) {
+  const usedCodes = new Set(templates.map((template) => template.languageCode))
+  let index = 1
+
+  while (usedCodes.has(`lang-${index}`)) {
+    index += 1
+  }
+
+  return `lang-${index}`
 }
 
 export default function AdminSettingsPage() {
@@ -79,6 +118,7 @@ export default function AdminSettingsPage() {
       setUserId(nextUserId)
       setDraftSettings(settings)
       setPreviewGuest(guests[0] ?? fallbackPreviewGuest)
+      setPreviewLanguage((currentLanguage) => resolvePreviewLanguage(settings, currentLanguage))
     } catch (error) {
       if (error instanceof Error && error.message === AUTH_REQUIRED_ERROR) {
         router.replace("/login")
@@ -95,10 +135,66 @@ export default function AdminSettingsPage() {
     void loadPageData()
   }, [loadPageData])
 
+  useEffect(() => {
+    setPreviewLanguage((currentLanguage) => resolvePreviewLanguage(draftSettings, currentLanguage))
+  }, [draftSettings])
+
   const previewMessage = useMemo(
     () => buildInvitationMessage(draftSettings, previewGuest, previewLanguage),
     [draftSettings, previewGuest, previewLanguage]
   )
+
+  const handleTemplateChange = (
+    index: number,
+    patch: Partial<Pick<InvitationMessageTemplate, "languageCode" | "languageLabel" | "openingText" | "closingText">>
+  ) => {
+    setDraftSettings((currentSettings) => ({
+      ...currentSettings,
+      templates: currentSettings.templates.map((template, templateIndex) =>
+        templateIndex === index
+          ? {
+              ...template,
+              ...patch,
+            }
+          : template
+      ),
+    }))
+  }
+
+  const handleAddLanguage = () => {
+    const nextLanguageCode = buildNextLanguageCode(draftSettings.templates)
+    const nextTemplate: InvitationMessageTemplate = {
+      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      languageCode: nextLanguageCode,
+      languageLabel: "Bahasa Baru",
+      openingText: "",
+      closingText: "",
+    }
+
+    setDraftSettings((currentSettings) => ({
+      ...currentSettings,
+      templates: [...currentSettings.templates, nextTemplate],
+    }))
+    setPreviewLanguage(nextLanguageCode)
+  }
+
+  const handleRemoveLanguage = (index: number) => {
+    setDraftSettings((currentSettings) => {
+      if (currentSettings.templates.length <= 1) return currentSettings
+
+      const removedTemplate = currentSettings.templates[index]
+      const nextTemplates = currentSettings.templates.filter((_, templateIndex) => templateIndex !== index)
+
+      if (removedTemplate && previewLanguage === removedTemplate.languageCode) {
+        setPreviewLanguage(nextTemplates[0]?.languageCode ?? "id")
+      }
+
+      return {
+        ...currentSettings,
+        templates: nextTemplates,
+      }
+    })
+  }
 
   const handleSave = async () => {
     if (!userId) return
@@ -108,6 +204,7 @@ export default function AdminSettingsPage() {
     try {
       const nextSettings = await upsertInvitationSettings(supabase, userId, draftSettings)
       setDraftSettings(nextSettings)
+      setPreviewLanguage((currentLanguage) => resolvePreviewLanguage(nextSettings, currentLanguage))
       toast.success("Pengaturan undangan berhasil disimpan")
     } catch (error) {
       const message = error instanceof Error ? error.message : "Pengaturan belum bisa disimpan."
@@ -148,6 +245,9 @@ export default function AdminSettingsPage() {
           <SettingsForm
             settings={draftSettings}
             onChange={setDraftSettings}
+            onTemplateChange={handleTemplateChange}
+            onAddLanguage={handleAddLanguage}
+            onRemoveLanguage={handleRemoveLanguage}
             onSave={handleSave}
             previewGuestName={previewGuest.name}
             previewMessage={previewMessage}

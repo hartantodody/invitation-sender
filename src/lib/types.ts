@@ -1,14 +1,19 @@
-export type InvitationSettings = {
-  baseUrl: string
-  openingText: string
-  closingText: string
-  openingTextEn: string
-  closingTextEn: string
-}
-
 export type GuestStatus = "pending" | "sent"
 export type GuestShift = "1" | "2" | "3"
-export type InvitationLanguage = "id" | "en"
+export type InvitationLanguage = string
+
+export type InvitationMessageTemplate = {
+  id: string
+  languageCode: string
+  languageLabel: string
+  openingText: string
+  closingText: string
+}
+
+export type InvitationSettings = {
+  baseUrl: string
+  templates: InvitationMessageTemplate[]
+}
 
 export type Guest = {
   id: string
@@ -34,10 +39,17 @@ export type InvitationSettingsRow = {
   id: string
   user_id: string
   base_url: string
+  created_at: string
+  updated_at: string
+}
+
+export type InvitationMessageTemplateRow = {
+  id: string
+  user_id: string
+  language_code: string
+  language_label: string
   opening_text: string
   closing_text: string
-  opening_text_en: string
-  closing_text_en: string
   created_at: string
   updated_at: string
 }
