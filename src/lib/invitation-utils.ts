@@ -1,5 +1,13 @@
 import type { Guest, InvitationLanguage, InvitationSettings } from "@/lib/types"
 
+function normalizeInvitationText(text: string) {
+  return text
+    .normalize("NFC")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+    .replace(/\uFFFD/g, "")
+}
+
 export function buildGuestQueryParam(name: string): string {
   return name
     .trim()
@@ -60,9 +68,13 @@ export function buildInvitationMessage(
     selectedTemplate.languageCode
   )
 
-  return [selectedTemplate.openingText.trim(), invitationUrl, selectedTemplate.closingText.trim()]
+  const openingText = normalizeInvitationText(selectedTemplate.openingText).trim()
+  const closingText = normalizeInvitationText(selectedTemplate.closingText).trim()
+
+  return [openingText, invitationUrl, closingText]
     .filter(Boolean)
     .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
 }
 
 export function formatPhoneForWhatsApp(phone: string | null | undefined): string {
@@ -79,7 +91,7 @@ export function formatPhoneForWhatsApp(phone: string | null | undefined): string
 export function buildWhatsAppUrl(phone: string | null | undefined, message: string): string {
   const formattedPhone = formatPhoneForWhatsApp(phone)
   const url = new URL(formattedPhone ? `https://api.whatsapp.com/send` : "https://api.whatsapp.com/send")
-  const normalizedMessage = message.normalize("NFC").replace(/\uFFFD/g, "")
+  const normalizedMessage = normalizeInvitationText(message)
 
   if (formattedPhone) {
     url.searchParams.set("phone", formattedPhone)
