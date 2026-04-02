@@ -42,7 +42,7 @@ function mapGuestRow(row: GuestRow): Guest {
   return {
     id: row.id,
     name: row.name,
-    phone: row.phone,
+    phone: row.phone ?? null,
     guestFrom: row.guest_from,
     queryParam: row.query_param,
     shift: shift as Guest["shift"],
@@ -68,7 +68,7 @@ function normalizeGuestFormValues(values: GuestFormInput, usedQueryParams?: Set<
 
   return {
     name: normalizedName,
-    phone: values.phone.trim(),
+    phone: values.phone.trim() || null,
     guest_from: values.guestFrom.trim(),
     query_param: queryParam,
     shift: Number(values.shift) as GuestRow["shift"],

@@ -35,7 +35,6 @@ function validate(values: GuestFormInput): FormErrors {
   const errors: FormErrors = {}
 
   if (!values.name.trim()) errors.name = "Nama wajib diisi."
-  if (!values.phone.trim()) errors.phone = "Nomor wajib diisi."
   if (!values.guestFrom.trim()) errors.guestFrom = "Kolom ini wajib diisi."
   if (!values.shift) errors.shift = "Shift wajib dipilih."
 
@@ -80,7 +79,7 @@ export function GuestForm({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="guest-phone">Nomor WhatsApp</Label>
+        <Label htmlFor="guest-phone">Nomor WhatsApp (opsional)</Label>
         <Input
           id="guest-phone"
           value={values.phone}
@@ -89,7 +88,7 @@ export function GuestForm({
           placeholder="0812xxxx"
           aria-invalid={errors.phone ? true : undefined}
         />
-        {errors.phone ? <p className="text-xs text-destructive">{errors.phone}</p> : null}
+        <p className="text-xs text-muted-foreground">Boleh dikosongkan jika tamu tidak dikirim via WhatsApp.</p>
       </div>
 
       <div className="space-y-2">

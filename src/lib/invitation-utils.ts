@@ -56,8 +56,8 @@ export function buildInvitationMessage(
     .join("\n\n")
 }
 
-export function formatPhoneForWhatsApp(phone: string): string {
-  const digitsOnly = phone.replace(/\D/g, "")
+export function formatPhoneForWhatsApp(phone: string | null | undefined): string {
+  const digitsOnly = (phone ?? "").replace(/\D/g, "")
 
   if (!digitsOnly) return ""
   if (digitsOnly.startsWith("62")) return digitsOnly
@@ -67,7 +67,7 @@ export function formatPhoneForWhatsApp(phone: string): string {
   return digitsOnly
 }
 
-export function buildWhatsAppUrl(phone: string, message: string): string {
+export function buildWhatsAppUrl(phone: string | null | undefined, message: string): string {
   const formattedPhone = formatPhoneForWhatsApp(phone)
   const encodedMessage = encodeURIComponent(message)
 

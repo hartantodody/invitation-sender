@@ -49,6 +49,7 @@ import {
   updateGuestById,
 } from "@/lib/supabase/data"
 import { hasSupabasePublicEnv, missingSupabaseEnvMessage } from "@/lib/supabase/env"
+import { getSupabaseErrorMessage } from "@/lib/supabase/error"
 import type { Guest, GuestFormInput } from "@/lib/types"
 import { getGuestShiftLabel } from "@/lib/guest-shift"
 
@@ -66,7 +67,7 @@ function formatSentAt(sentAt: string | null) {
 function toFormValues(guest: Guest): GuestFormInput {
   return {
     name: guest.name,
-    phone: guest.phone,
+    phone: guest.phone ?? "",
     guestFrom: guest.guestFrom,
     shift: guest.shift,
     notes: guest.notes ?? "",
@@ -122,8 +123,8 @@ function parseBulkGuestRows(rows: Record<string, unknown>[]) {
     const shift = parseShiftValue(pickCellValue(row, guestHeaderAliases.shift))
     const notes = pickCellValue(row, guestHeaderAliases.notes)
 
-    if (!name || !phone || !guestFrom) {
-      skippedRows.push(`Baris ${rowNumber}: nama, nomor, dan "guest dari siapa" wajib diisi.`)
+    if (!name || !guestFrom) {
+      skippedRows.push(`Baris ${rowNumber}: nama dan "guest dari siapa" wajib diisi.`)
       return
     }
 
@@ -183,7 +184,7 @@ export default function AdminGuestsPage() {
         return
       }
 
-      setErrorMessage("Data tamu belum bisa dimuat dari Supabase.")
+      setErrorMessage(getSupabaseErrorMessage(error, "Data tamu belum bisa dimuat dari Supabase."))
     } finally {
       setIsLoading(false)
     }
@@ -199,7 +200,7 @@ export default function AdminGuestsPage() {
 
     return guests.filter((guest) => {
       const searchableText =
-        `${guest.name} ${guest.phone} ${guest.guestFrom} ${guest.queryParam} shift ${guest.shift}`.toLowerCase()
+        `${guest.name} ${guest.phone ?? ""} ${guest.guestFrom} ${guest.queryParam} shift ${guest.shift}`.toLowerCase()
       return searchableText.includes(normalizedQuery)
     })
   }, [guests, searchQuery])
@@ -376,7 +377,7 @@ export default function AdminGuestsPage() {
         />
 
         <p className="text-xs text-muted-foreground">
-          Import Excel: wajib punya kolom nama, nomor, guest dari siapa. Kolom shift opsional (default shift 1).
+          Import Excel: wajib punya kolom nama dan guest dari siapa. Kolom nomor/shift opsional (default shift 1).
         </p>
 
         {isLoading ? (
@@ -419,7 +420,7 @@ export default function AdminGuestsPage() {
                       <StatusBadge status={guest.status} />
                     </div>
                     <div className="space-y-0.5 text-sm text-muted-foreground">
-                      <p>{guest.phone}</p>
+                      <p>{guest.phone ?? "-"}</p>
                       <p className="text-xs">Guest dari: {guest.guestFrom}</p>
                       <p className="text-xs">{getGuestShiftLabel(guest.shift)}</p>
                       <p className="text-xs">Query: {guest.queryParam}</p>
@@ -470,7 +471,7 @@ export default function AdminGuestsPage() {
                   {filteredGuests.map((guest) => (
                     <TableRow key={guest.id}>
                       <TableCell className="font-medium">{guest.name}</TableCell>
-                      <TableCell>{guest.phone}</TableCell>
+                      <TableCell>{guest.phone ?? "-"}</TableCell>
                       <TableCell>{guest.guestFrom}</TableCell>
                       <TableCell>{getGuestShiftLabel(guest.shift)}</TableCell>
                       <TableCell>{guest.queryParam}</TableCell>

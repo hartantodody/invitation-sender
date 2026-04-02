@@ -13,7 +13,7 @@ export type InvitationLanguage = "id" | "en"
 export type Guest = {
   id: string
   name: string
-  phone: string
+  phone: string | null
   guestFrom: string
   queryParam: string
   shift: GuestShift
@@ -46,7 +46,7 @@ export type GuestRow = {
   id: string
   user_id: string
   name: string
-  phone: string
+  phone: string | null
   guest_from: string
   query_param: string
   shift: 1 | 2 | 3

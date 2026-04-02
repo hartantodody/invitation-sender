@@ -22,6 +22,7 @@ import {
   upsertInvitationSettings,
 } from "@/lib/supabase/data"
 import { hasSupabasePublicEnv, missingSupabaseEnvMessage } from "@/lib/supabase/env"
+import { getSupabaseErrorMessage } from "@/lib/supabase/error"
 import type { Guest, InvitationLanguage, InvitationSettings } from "@/lib/types"
 
 const fallbackPreviewGuest: Guest = {
@@ -84,7 +85,7 @@ export default function AdminSettingsPage() {
         return
       }
 
-      setErrorMessage("Pengaturan undangan belum bisa dimuat.")
+      setErrorMessage(getSupabaseErrorMessage(error, "Pengaturan undangan belum bisa dimuat."))
     } finally {
       setIsLoading(false)
     }

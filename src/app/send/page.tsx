@@ -36,9 +36,11 @@ import {
   markGuestAsSent,
 } from "@/lib/supabase/data"
 import { hasSupabasePublicEnv, missingSupabaseEnvMessage } from "@/lib/supabase/env"
+import { getSupabaseErrorMessage } from "@/lib/supabase/error"
 import type { Guest, InvitationLanguage, InvitationSettings } from "@/lib/types"
 
 type SendFilter = "all" | "pending" | "sent"
+const allGuestFromFilterValue = "__all_guest_from__"
 
 const sendFilterOptions: { value: SendFilter; label: string }[] = [
   { value: "all", label: "Semua" },
@@ -59,6 +61,7 @@ export default function SendPage() {
   const [markingGuestId, setMarkingGuestId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<SendFilter>("all")
+  const [guestFromFilter, setGuestFromFilter] = useState(allGuestFromFilterValue)
   const [sendLanguage, setSendLanguage] = useState<InvitationLanguage>("id")
   const [lastCopiedGuestId, setLastCopiedGuestId] = useState<string | null>(null)
 
@@ -88,7 +91,9 @@ export default function SendPage() {
         return
       }
 
-      setErrorMessage("Data undangan belum bisa dimuat. Coba lagi sebentar.")
+      setErrorMessage(
+        getSupabaseErrorMessage(error, "Data undangan belum bisa dimuat. Coba lagi sebentar.")
+      )
     } finally {
       setIsLoading(false)
     }
@@ -102,20 +107,34 @@ export default function SendPage() {
   const sentCount = guests.filter((guest) => guest.status === "sent").length
   const pendingCount = totalGuests - sentCount
 
+  const guestFromOptions = useMemo(() => {
+    const uniqueGuestFrom = new Set(
+      guests
+        .map((guest) => guest.guestFrom.trim())
+        .filter(Boolean)
+    )
+
+    return Array.from(uniqueGuestFrom).sort((a, b) => a.localeCompare(b, "id"))
+  }, [guests])
+
   const filteredGuests = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase()
 
     return guests.filter((guest) => {
-      const searchableText = `${guest.name} ${guest.phone} ${guest.guestFrom}`.toLowerCase()
+      const searchableText = `${guest.name} ${guest.phone ?? ""} ${guest.guestFrom}`.toLowerCase()
       const matchesSearch = searchableText.includes(normalizedQuery)
       if (!matchesSearch) return false
+
+      if (guestFromFilter !== allGuestFromFilterValue && guest.guestFrom !== guestFromFilter) {
+        return false
+      }
 
       if (statusFilter === "all") return true
       if (statusFilter === "pending") return guest.status === "pending"
 
       return guest.status === "sent"
     })
-  }, [guests, searchQuery, statusFilter])
+  }, [guests, guestFromFilter, searchQuery, statusFilter])
 
   const handleCopyMessage = async (guest: Guest) => {
     if (!settings) {
@@ -142,6 +161,10 @@ export default function SendPage() {
   const handleOpenWhatsApp = (guest: Guest) => {
     if (!settings) {
       toast.error("Pengaturan undangan belum siap.")
+      return
+    }
+    if (!guest.phone?.trim()) {
+      toast.error(`Nomor WhatsApp untuk ${guest.name} belum diisi.`)
       return
     }
 
@@ -191,20 +214,39 @@ export default function SendPage() {
           />
 
           <div className="rounded-xl border border-border/80 bg-[#f7faf7] px-3 py-2.5">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-medium text-foreground">Bahasa Pesan</p>
-              <Select
-                value={sendLanguage}
-                onValueChange={(value) => setSendLanguage(value as InvitationLanguage)}
-              >
-                <SelectTrigger className="h-9 min-w-32 rounded-lg bg-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="id">Indonesia</SelectItem>
-                  <SelectItem value="en">English</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid gap-2.5 sm:grid-cols-2 sm:gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium text-foreground">Bahasa Pesan</p>
+                <Select
+                  value={sendLanguage}
+                  onValueChange={(value) => setSendLanguage(value as InvitationLanguage)}
+                >
+                  <SelectTrigger className="h-9 min-w-32 rounded-lg bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="id">Indonesia</SelectItem>
+                    <SelectItem value="en">English</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium text-foreground">Guest Dari</p>
+                <Select value={guestFromFilter} onValueChange={setGuestFromFilter}>
+                  <SelectTrigger className="h-9 min-w-36 rounded-lg bg-white">
+                    <SelectValue placeholder="Semua" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={allGuestFromFilterValue}>Semua</SelectItem>
+                    {guestFromOptions.map((guestFrom) => (
+                      <SelectItem key={guestFrom} value={guestFrom}>
+                        {guestFrom}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 
@@ -255,6 +297,7 @@ export default function SendPage() {
               onAction={() => {
                 setSearchQuery("")
                 setStatusFilter("all")
+                setGuestFromFilter(allGuestFromFilterValue)
               }}
             />
           ) : (

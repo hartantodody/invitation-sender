@@ -72,7 +72,7 @@ create table if not exists public.guests (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   name text not null check (length(trim(name)) > 0),
-  phone text not null check (length(trim(phone)) > 0),
+  phone text,
   guest_from text not null check (length(trim(guest_from)) > 0),
   query_param text not null check (length(trim(query_param)) > 0),
   shift smallint not null default 1,
@@ -82,6 +82,24 @@ create table if not exists public.guests (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
+
+update public.guests set phone = null where phone is not null and length(trim(phone)) = 0;
+alter table public.guests alter column phone drop not null;
+alter table public.guests drop constraint if exists guests_phone_check;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'guests_phone_optional_check'
+      and conrelid = 'public.guests'::regclass
+  ) then
+    alter table public.guests
+      add constraint guests_phone_optional_check
+      check (phone is null or length(trim(phone)) > 0);
+  end if;
+end $$;
 
 alter table public.guests add column if not exists guest_from text;
 update public.guests set guest_from = 'Keluarga' where guest_from is null or length(trim(guest_from)) = 0;

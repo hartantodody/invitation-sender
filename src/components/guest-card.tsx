@@ -35,6 +35,7 @@ export function GuestCard({
   isMarkingAsSent = false,
 }: GuestCardProps) {
   const isSent = guest.status === "sent"
+  const hasWhatsAppNumber = Boolean(guest.phone?.trim())
 
   return (
     <Card className="gap-3 rounded-2xl border border-border/80 bg-white py-0 shadow-none">
@@ -44,7 +45,7 @@ export function GuestCard({
           <StatusBadge status={guest.status} />
         </div>
         <div className="space-y-1 text-sm text-muted-foreground">
-          <p>{guest.phone}</p>
+          <p>{guest.phone?.trim() || "-"}</p>
           <p className="text-xs">Guest dari: {guest.guestFrom}</p>
           <p className="inline-flex items-center gap-1.5 text-xs">
             <TimerIcon className="size-3.5" />
@@ -67,9 +68,13 @@ export function GuestCard({
             <CopyIcon className="size-4" />
             {copiedRecently ? "Tersalin" : "Salin Pesan"}
           </Button>
-          <Button className="h-11 rounded-xl bg-[#2f6f44] text-sm hover:bg-[#2a663e]" onClick={() => onOpenWhatsApp(guest)}>
+          <Button
+            className="h-11 rounded-xl bg-[#2f6f44] text-sm hover:bg-[#2a663e]"
+            onClick={() => onOpenWhatsApp(guest)}
+            disabled={!hasWhatsAppNumber}
+          >
             <MessageCircleIcon className="size-4" />
-            Buka WhatsApp
+            {hasWhatsAppNumber ? "Buka WhatsApp" : "Nomor WA Kosong"}
           </Button>
         </div>
 
