@@ -9,6 +9,7 @@ import { AppShell } from "@/components/app-shell"
 import { EmptyState } from "@/components/empty-state"
 import { GuestCard } from "@/components/guest-card"
 import { MobileHeader } from "@/components/mobile-header"
+import { PaginationControls } from "@/components/pagination-controls"
 import { SearchInput } from "@/components/search-input"
 import { SignOutButton } from "@/components/sign-out-button"
 import { StatsSummary } from "@/components/stats-summary"
@@ -21,28 +22,33 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  buildInvitationMessage,
-  buildWhatsAppUrl,
-  copyToClipboard,
-} from "@/lib/invitation-utils"
+import { buildInvitationMessage, buildWhatsAppUrl, copyToClipboard } from "@/lib/invitation-utils"
 import { protectedNavItems } from "@/lib/navigation"
 import { createClient } from "@/lib/supabase/client"
 import {
   AUTH_REQUIRED_ERROR,
   ensureInvitationSettings,
-  fetchGuests,
+  fetchGuestFromOptions,
+  fetchGuestsPage,
+  fetchGuestStats,
   getAuthenticatedUserId,
   markGuestAsSent,
+  type GuestStatusFilter,
 } from "@/lib/supabase/data"
 import { hasSupabasePublicEnv, missingSupabaseEnvMessage } from "@/lib/supabase/env"
 import { getSupabaseErrorMessage } from "@/lib/supabase/error"
 import type { Guest, InvitationLanguage, InvitationSettings } from "@/lib/types"
 
-type SendFilter = "all" | "pending" | "sent"
-const allGuestFromFilterValue = "__all_guest_from__"
+type GuestStats = {
+  total: number
+  sent: number
+  pending: number
+}
 
-const sendFilterOptions: { value: SendFilter; label: string }[] = [
+const PAGE_SIZE = 9
+const SEARCH_DEBOUNCE_MS = 350
+const allGuestFromFilterValue = "__all_guest_from__"
+const sendFilterOptions: { value: GuestStatusFilter; label: string }[] = [
   { value: "all", label: "Semua" },
   { value: "pending", label: "Belum Terkirim" },
   { value: "sent", label: "Terkirim" },
@@ -56,52 +62,144 @@ export default function SendPage() {
   const [guests, setGuests] = useState<Guest[]>([])
   const [settings, setSettings] = useState<InvitationSettings | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [markingGuestId, setMarkingGuestId] = useState<string | null>(null)
+  const [guestFromOptions, setGuestFromOptions] = useState<string[]>([])
+  const [stats, setStats] = useState<GuestStats>({
+    total: 0,
+    sent: 0,
+    pending: 0,
+  })
+  const [totalGuests, setTotalGuests] = useState(0)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
-  const [statusFilter, setStatusFilter] = useState<SendFilter>("all")
+  const [statusFilter, setStatusFilter] = useState<GuestStatusFilter>("all")
   const [guestFromFilter, setGuestFromFilter] = useState(allGuestFromFilterValue)
   const [sendLanguage, setSendLanguage] = useState<InvitationLanguage>("id")
+  const [isBootstrapping, setIsBootstrapping] = useState(true)
+  const [isGuestsLoading, setIsGuestsLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [markingGuestId, setMarkingGuestId] = useState<string | null>(null)
   const [lastCopiedGuestId, setLastCopiedGuestId] = useState<string | null>(null)
 
-  const loadPageData = useCallback(async () => {
-    setIsLoading(true)
+  const isLoading = isBootstrapping || isGuestsLoading
+
+  useEffect(() => {
+    const timerId = window.setTimeout(() => {
+      setSearchQuery(searchInput.trim())
+    }, SEARCH_DEBOUNCE_MS)
+
+    return () => {
+      window.clearTimeout(timerId)
+    }
+  }, [searchInput])
+
+  const loadGuestStats = useCallback(
+    async (activeUserId?: string) => {
+      const resolvedUserId = activeUserId ?? userId
+      if (!resolvedUserId) return
+
+      const nextStats = await fetchGuestStats(supabase, resolvedUserId)
+      setStats(nextStats)
+    },
+    [supabase, userId]
+  )
+
+  const loadGuestsPage = useCallback(
+    async (activeUserId?: string, pageOverride?: number) => {
+      const resolvedUserId = activeUserId ?? userId
+      const resolvedPage = pageOverride ?? currentPage
+
+      if (!resolvedUserId) return
+
+      setIsGuestsLoading(true)
+      setErrorMessage(null)
+
+      if (!isSupabaseConfigured) {
+        setErrorMessage(missingSupabaseEnvMessage)
+        setIsGuestsLoading(false)
+        return
+      }
+
+      try {
+        const { guests: nextGuests, totalCount } = await fetchGuestsPage(supabase, {
+          userId: resolvedUserId,
+          page: resolvedPage,
+          pageSize: PAGE_SIZE,
+          searchQuery,
+          status: statusFilter,
+          guestFrom: guestFromFilter === allGuestFromFilterValue ? null : guestFromFilter,
+        })
+
+        const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+        if (resolvedPage > totalPages) {
+          setCurrentPage(totalPages)
+          return
+        }
+
+        setGuests(nextGuests)
+        setTotalGuests(totalCount)
+      } catch (error) {
+        if (error instanceof Error && error.message === AUTH_REQUIRED_ERROR) {
+          router.replace("/login")
+          return
+        }
+
+        setErrorMessage(getSupabaseErrorMessage(error, "Data undangan belum bisa dimuat. Coba lagi sebentar."))
+      } finally {
+        setIsGuestsLoading(false)
+      }
+    },
+    [currentPage, guestFromFilter, isSupabaseConfigured, router, searchQuery, statusFilter, supabase, userId]
+  )
+
+  const initializePage = useCallback(async () => {
+    setIsBootstrapping(true)
     setErrorMessage(null)
 
     if (!isSupabaseConfigured) {
       setErrorMessage(missingSupabaseEnvMessage)
-      setIsLoading(false)
+      setIsBootstrapping(false)
       return
     }
 
     try {
       const nextUserId = await getAuthenticatedUserId(supabase)
-      const [nextSettings, nextGuests] = await Promise.all([
+      const [nextSettings, nextGuestFromOptions] = await Promise.all([
         ensureInvitationSettings(supabase, nextUserId),
-        fetchGuests(supabase, nextUserId),
+        fetchGuestFromOptions(supabase, nextUserId),
       ])
 
       setUserId(nextUserId)
       setSettings(nextSettings)
-      setGuests(nextGuests)
+      setGuestFromOptions(nextGuestFromOptions)
+      setSendLanguage((currentLanguage) => {
+        const hasLanguage = nextSettings.templates.some(
+          (template) => template.languageCode === currentLanguage
+        )
+        return hasLanguage ? currentLanguage : (nextSettings.templates[0]?.languageCode ?? "id")
+      })
+
+      await loadGuestStats(nextUserId)
     } catch (error) {
       if (error instanceof Error && error.message === AUTH_REQUIRED_ERROR) {
         router.replace("/login")
         return
       }
 
-      setErrorMessage(
-        getSupabaseErrorMessage(error, "Data undangan belum bisa dimuat. Coba lagi sebentar.")
-      )
+      setErrorMessage(getSupabaseErrorMessage(error, "Data undangan belum bisa dimuat. Coba lagi sebentar."))
     } finally {
-      setIsLoading(false)
+      setIsBootstrapping(false)
     }
-  }, [isSupabaseConfigured, router, supabase])
+  }, [isSupabaseConfigured, loadGuestStats, router, supabase])
 
   useEffect(() => {
-    void loadPageData()
-  }, [loadPageData])
+    void initializePage()
+  }, [initializePage])
+
+  useEffect(() => {
+    if (!userId || isBootstrapping) return
+    void loadGuestsPage(userId)
+  }, [currentPage, isBootstrapping, loadGuestsPage, searchQuery, statusFilter, guestFromFilter, userId])
 
   useEffect(() => {
     if (!settings?.templates.length) return
@@ -115,43 +213,10 @@ export default function SendPage() {
     }
   }, [sendLanguage, settings])
 
-  const totalGuests = guests.length
-  const sentCount = guests.filter((guest) => guest.status === "sent").length
-  const pendingCount = totalGuests - sentCount
-
-  const guestFromOptions = useMemo(() => {
-    const uniqueGuestFrom = new Set(
-      guests
-        .map((guest) => guest.guestFrom.trim())
-        .filter(Boolean)
-    )
-
-    return Array.from(uniqueGuestFrom).sort((a, b) => a.localeCompare(b, "id"))
-  }, [guests])
-
   const sendLanguageOptions = useMemo(
     () => settings?.templates.filter((template) => template.languageCode.trim()) ?? [],
     [settings]
   )
-
-  const filteredGuests = useMemo(() => {
-    const normalizedQuery = searchQuery.trim().toLowerCase()
-
-    return guests.filter((guest) => {
-      const searchableText = `${guest.name} ${guest.phone ?? ""} ${guest.guestFrom}`.toLowerCase()
-      const matchesSearch = searchableText.includes(normalizedQuery)
-      if (!matchesSearch) return false
-
-      if (guestFromFilter !== allGuestFromFilterValue && guest.guestFrom !== guestFromFilter) {
-        return false
-      }
-
-      if (statusFilter === "all") return true
-      if (statusFilter === "pending") return guest.status === "pending"
-
-      return guest.status === "sent"
-    })
-  }, [guests, guestFromFilter, searchQuery, statusFilter])
 
   const handleCopyMessage = async (guest: Guest) => {
     if (!settings) {
@@ -196,12 +261,8 @@ export default function SendPage() {
     setMarkingGuestId(guest.id)
 
     try {
-      const updatedGuest = await markGuestAsSent(supabase, userId, guest.id)
-      setGuests((currentGuests) =>
-        currentGuests.map((currentGuest) =>
-          currentGuest.id === updatedGuest.id ? updatedGuest : currentGuest
-        )
-      )
+      await markGuestAsSent(supabase, userId, guest.id)
+      await Promise.all([loadGuestStats(userId), loadGuestsPage(userId)])
       toast.success(`${guest.name} ditandai terkirim`)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Status tamu belum bisa diperbarui."
@@ -221,12 +282,15 @@ export default function SendPage() {
           action={<SignOutButton />}
         />
 
-        <StatsSummary total={totalGuests} sent={sentCount} pending={pendingCount} />
+        <StatsSummary total={stats.total} sent={stats.sent} pending={stats.pending} />
 
         <div className="space-y-2.5">
           <SearchInput
-            value={searchQuery}
-            onChange={setSearchQuery}
+            value={searchInput}
+            onChange={(value) => {
+              setSearchInput(value)
+              setCurrentPage(1)
+            }}
             placeholder="Cari nama, nomor, atau guest dari..."
           />
 
@@ -234,10 +298,7 @@ export default function SendPage() {
             <div className="grid gap-2.5 sm:grid-cols-2 sm:gap-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-medium text-foreground">Bahasa Pesan</p>
-                <Select
-                  value={sendLanguage}
-                  onValueChange={setSendLanguage}
-                >
+                <Select value={sendLanguage} onValueChange={setSendLanguage}>
                   <SelectTrigger className="h-9 min-w-32 rounded-lg bg-white">
                     <SelectValue />
                   </SelectTrigger>
@@ -253,7 +314,13 @@ export default function SendPage() {
 
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-medium text-foreground">Guest Dari</p>
-                <Select value={guestFromFilter} onValueChange={setGuestFromFilter}>
+                <Select
+                  value={guestFromFilter}
+                  onValueChange={(value) => {
+                    setGuestFromFilter(value)
+                    setCurrentPage(1)
+                  }}
+                >
                   <SelectTrigger className="h-9 min-w-36 rounded-lg bg-white">
                     <SelectValue placeholder="Semua" />
                   </SelectTrigger>
@@ -276,7 +343,10 @@ export default function SendPage() {
                 key={option.value}
                 variant={statusFilter === option.value ? "secondary" : "ghost"}
                 className="h-10 rounded-lg text-sm"
-                onClick={() => setStatusFilter(option.value)}
+                onClick={() => {
+                  setStatusFilter(option.value)
+                  setCurrentPage(1)
+                }}
               >
                 {option.label}
               </Button>
@@ -299,41 +369,57 @@ export default function SendPage() {
               description={errorMessage}
               actionLabel="Coba Lagi"
               onAction={() => {
-                void loadPageData()
+                if (userId) {
+                  void Promise.all([loadGuestStats(userId), loadGuestsPage(userId)])
+                  return
+                }
+                void initializePage()
               }}
             />
-          ) : guests.length === 0 ? (
+          ) : stats.total === 0 ? (
             <EmptyState
               icon={UsersRoundIcon}
               title="Belum ada tamu"
               description="Tambahkan tamu pertama dari halaman Kelola Tamu."
             />
-          ) : filteredGuests.length === 0 ? (
+          ) : guests.length === 0 ? (
             <EmptyState
               icon={InboxIcon}
               title="Tamu tidak ditemukan"
               description="Coba kata kunci lain atau ubah filter."
               actionLabel="Reset Pencarian"
               onAction={() => {
+                setSearchInput("")
                 setSearchQuery("")
                 setStatusFilter("all")
                 setGuestFromFilter(allGuestFromFilterValue)
+                setCurrentPage(1)
               }}
             />
           ) : (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {filteredGuests.map((guest) => (
-                <GuestCard
-                  key={guest.id}
-                  guest={guest}
-                  onCopyMessage={handleCopyMessage}
-                  onOpenWhatsApp={handleOpenWhatsApp}
-                  onMarkAsSent={handleMarkAsSent}
-                  copiedRecently={lastCopiedGuestId === guest.id}
-                  isMarkingAsSent={markingGuestId === guest.id}
-                />
-              ))}
-            </div>
+            <>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {guests.map((guest) => (
+                  <GuestCard
+                    key={guest.id}
+                    guest={guest}
+                    onCopyMessage={handleCopyMessage}
+                    onOpenWhatsApp={handleOpenWhatsApp}
+                    onMarkAsSent={handleMarkAsSent}
+                    copiedRecently={lastCopiedGuestId === guest.id}
+                    isMarkingAsSent={markingGuestId === guest.id}
+                  />
+                ))}
+              </div>
+
+              <PaginationControls
+                page={currentPage}
+                pageSize={PAGE_SIZE}
+                totalCount={totalGuests}
+                isLoading={isLoading}
+                onPageChange={setCurrentPage}
+              />
+            </>
           )}
         </section>
 

@@ -17,6 +17,7 @@ import { AppShell } from "@/components/app-shell"
 import { EmptyState } from "@/components/empty-state"
 import { GuestForm } from "@/components/guest-form"
 import { MobileHeader } from "@/components/mobile-header"
+import { PaginationControls } from "@/components/pagination-controls"
 import { SearchInput } from "@/components/search-input"
 import { SignOutButton } from "@/components/sign-out-button"
 import { StatusBadge } from "@/components/status-badge"
@@ -37,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { getGuestShiftLabel } from "@/lib/guest-shift"
 import { protectedNavItems } from "@/lib/navigation"
 import { createClient } from "@/lib/supabase/client"
 import {
@@ -44,14 +46,16 @@ import {
   createGuest,
   createGuestsBulk,
   deleteGuestById,
-  fetchGuests,
+  fetchGuestsPage,
   getAuthenticatedUserId,
   updateGuestById,
 } from "@/lib/supabase/data"
 import { hasSupabasePublicEnv, missingSupabaseEnvMessage } from "@/lib/supabase/env"
 import { getSupabaseErrorMessage } from "@/lib/supabase/error"
 import type { Guest, GuestFormInput } from "@/lib/types"
-import { getGuestShiftLabel } from "@/lib/guest-shift"
+
+const PAGE_SIZE = 12
+const SEARCH_DEBOUNCE_MS = 350
 
 function formatSentAt(sentAt: string | null) {
   if (!sentAt) return "-"
@@ -152,17 +156,77 @@ export default function AdminGuestsPage() {
 
   const [guests, setGuests] = useState<Guest[]>([])
   const [userId, setUserId] = useState<string | null>(null)
+  const [totalGuests, setTotalGuests] = useState(0)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [searchInput, setSearchInput] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isBulkImporting, setIsBulkImporting] = useState(false)
   const [deletingGuestId, setDeletingGuestId] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState("")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingGuest, setEditingGuest] = useState<Guest | null>(null)
   const importInputRef = useRef<HTMLInputElement | null>(null)
 
-  const loadGuests = useCallback(async () => {
+  useEffect(() => {
+    const timerId = window.setTimeout(() => {
+      setSearchQuery(searchInput.trim())
+    }, SEARCH_DEBOUNCE_MS)
+
+    return () => {
+      window.clearTimeout(timerId)
+    }
+  }, [searchInput])
+
+  const loadGuestsPage = useCallback(
+    async (activeUserId?: string, pageOverride?: number) => {
+      const resolvedUserId = activeUserId ?? userId
+      const resolvedPage = pageOverride ?? currentPage
+
+      if (!resolvedUserId) return
+
+      setIsLoading(true)
+      setErrorMessage(null)
+
+      if (!isSupabaseConfigured) {
+        setErrorMessage(missingSupabaseEnvMessage)
+        setIsLoading(false)
+        return
+      }
+
+      try {
+        const { guests: nextGuests, totalCount } = await fetchGuestsPage(supabase, {
+          userId: resolvedUserId,
+          page: resolvedPage,
+          pageSize: PAGE_SIZE,
+          searchQuery,
+        })
+
+        const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+
+        if (resolvedPage > totalPages) {
+          setCurrentPage(totalPages)
+          return
+        }
+
+        setGuests(nextGuests)
+        setTotalGuests(totalCount)
+      } catch (error) {
+        if (error instanceof Error && error.message === AUTH_REQUIRED_ERROR) {
+          router.replace("/login")
+          return
+        }
+
+        setErrorMessage(getSupabaseErrorMessage(error, "Data tamu belum bisa dimuat dari Supabase."))
+      } finally {
+        setIsLoading(false)
+      }
+    },
+    [currentPage, isSupabaseConfigured, router, searchQuery, supabase, userId]
+  )
+
+  const initializePage = useCallback(async () => {
     setIsLoading(true)
     setErrorMessage(null)
 
@@ -174,10 +238,7 @@ export default function AdminGuestsPage() {
 
     try {
       const nextUserId = await getAuthenticatedUserId(supabase)
-      const nextGuests = await fetchGuests(supabase, nextUserId)
-
       setUserId(nextUserId)
-      setGuests(nextGuests)
     } catch (error) {
       if (error instanceof Error && error.message === AUTH_REQUIRED_ERROR) {
         router.replace("/login")
@@ -185,25 +246,18 @@ export default function AdminGuestsPage() {
       }
 
       setErrorMessage(getSupabaseErrorMessage(error, "Data tamu belum bisa dimuat dari Supabase."))
-    } finally {
       setIsLoading(false)
     }
   }, [isSupabaseConfigured, router, supabase])
 
   useEffect(() => {
-    void loadGuests()
-  }, [loadGuests])
+    void initializePage()
+  }, [initializePage])
 
-  const filteredGuests = useMemo(() => {
-    const normalizedQuery = searchQuery.trim().toLowerCase()
-    if (!normalizedQuery) return guests
-
-    return guests.filter((guest) => {
-      const searchableText =
-        `${guest.name} ${guest.phone ?? ""} ${guest.guestFrom} ${guest.queryParam} shift ${guest.shift}`.toLowerCase()
-      return searchableText.includes(normalizedQuery)
-    })
-  }, [guests, searchQuery])
+  useEffect(() => {
+    if (!userId) return
+    void loadGuestsPage(userId)
+  }, [currentPage, loadGuestsPage, searchQuery, userId])
 
   const openAddDialog = () => {
     setEditingGuest(null)
@@ -227,17 +281,14 @@ export default function AdminGuestsPage() {
 
     try {
       if (editingGuest) {
-        const updatedGuest = await updateGuestById(supabase, userId, editingGuest.id, values)
-        setGuests((currentGuests) =>
-          currentGuests.map((currentGuest) =>
-            currentGuest.id === updatedGuest.id ? updatedGuest : currentGuest
-          )
-        )
+        await updateGuestById(supabase, userId, editingGuest.id, values)
         toast.success("Data tamu berhasil diperbarui")
+        await loadGuestsPage(userId)
       } else {
-        const createdGuest = await createGuest(supabase, userId, values)
-        setGuests((currentGuests) => [createdGuest, ...currentGuests])
+        await createGuest(supabase, userId, values)
         toast.success("Tamu berhasil ditambahkan")
+        setCurrentPage(1)
+        await loadGuestsPage(userId, 1)
       }
 
       closeDialog()
@@ -259,8 +310,8 @@ export default function AdminGuestsPage() {
 
     try {
       await deleteGuestById(supabase, userId, guest.id)
-      setGuests((currentGuests) => currentGuests.filter((currentGuest) => currentGuest.id !== guest.id))
       toast.success("Tamu berhasil dihapus")
+      await loadGuestsPage(userId)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Tamu belum bisa dihapus."
       toast.error(message)
@@ -307,14 +358,15 @@ export default function AdminGuestsPage() {
         return
       }
 
-      const insertedGuests = await createGuestsBulk(supabase, userId, validRows)
-      setGuests((currentGuests) => [...insertedGuests, ...currentGuests])
-
-      toast.success(`${insertedGuests.length} tamu berhasil diimport.`)
+      await createGuestsBulk(supabase, userId, validRows)
+      toast.success(`${validRows.length} tamu berhasil diimport.`)
 
       if (skippedRows.length > 0) {
         toast.warning(`${skippedRows.length} baris dilewati karena data tidak valid.`)
       }
+
+      setCurrentPage(1)
+      await loadGuestsPage(userId, 1)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Import Excel gagal diproses."
       toast.error(message)
@@ -322,6 +374,8 @@ export default function AdminGuestsPage() {
       setIsBulkImporting(false)
     }
   }
+
+  const hasSearch = Boolean(searchQuery)
 
   return (
     <AppShell size="xl">
@@ -336,8 +390,11 @@ export default function AdminGuestsPage() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="flex-1">
             <SearchInput
-              value={searchQuery}
-              onChange={setSearchQuery}
+              value={searchInput}
+              onChange={(value) => {
+                setSearchInput(value)
+                setCurrentPage(1)
+              }}
               placeholder="Cari nama, guest dari, nomor, atau query param..."
             />
           </div>
@@ -394,25 +451,33 @@ export default function AdminGuestsPage() {
             description={errorMessage}
             actionLabel="Coba Lagi"
             onAction={() => {
-              void loadGuests()
+              void initializePage()
             }}
           />
-        ) : filteredGuests.length === 0 ? (
+        ) : guests.length === 0 ? (
           <EmptyState
             icon={UsersRoundIcon}
-            title={guests.length === 0 ? "Belum ada data tamu" : "Tamu tidak ditemukan"}
+            title={hasSearch ? "Tamu tidak ditemukan" : "Belum ada data tamu"}
             description={
-              guests.length === 0
-                ? "Mulai dengan menambahkan tamu pertama."
-                : "Coba ubah kata kunci pencarian."
+              hasSearch
+                ? "Coba ubah kata kunci pencarian."
+                : "Mulai dengan menambahkan tamu pertama."
             }
-            actionLabel={guests.length === 0 ? "Tambah Tamu" : "Reset Pencarian"}
-            onAction={guests.length === 0 ? openAddDialog : () => setSearchQuery("")}
+            actionLabel={hasSearch ? "Reset Pencarian" : "Tambah Tamu"}
+            onAction={
+              hasSearch
+                ? () => {
+                    setSearchInput("")
+                    setSearchQuery("")
+                    setCurrentPage(1)
+                  }
+                : openAddDialog
+            }
           />
         ) : (
           <>
             <div className="space-y-3 md:hidden">
-              {filteredGuests.map((guest) => (
+              {guests.map((guest) => (
                 <Card key={guest.id} className="rounded-2xl border border-border/80 bg-white py-0 shadow-none">
                   <CardHeader className="space-y-2 border-b border-border/70 px-4 py-4">
                     <div className="flex items-start justify-between gap-2">
@@ -468,7 +533,7 @@ export default function AdminGuestsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredGuests.map((guest) => (
+                  {guests.map((guest) => (
                     <TableRow key={guest.id}>
                       <TableCell className="font-medium">{guest.name}</TableCell>
                       <TableCell>{guest.phone ?? "-"}</TableCell>
@@ -508,6 +573,14 @@ export default function AdminGuestsPage() {
                 </TableBody>
               </Table>
             </div>
+
+            <PaginationControls
+              page={currentPage}
+              pageSize={PAGE_SIZE}
+              totalCount={totalGuests}
+              isLoading={isLoading}
+              onPageChange={setCurrentPage}
+            />
           </>
         )}
 
@@ -530,7 +603,9 @@ export default function AdminGuestsPage() {
                 key={editingGuest ? editingGuest.id : "new-guest"}
                 mode={editingGuest ? "edit" : "add"}
                 initialValues={editingGuest ? toFormValues(editingGuest) : undefined}
-                onSubmit={handleSubmit}
+                onSubmit={(values) => {
+                  void handleSubmit(values)
+                }}
                 onCancel={closeDialog}
                 isSubmitting={isSubmitting}
               />

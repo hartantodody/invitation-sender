@@ -4,6 +4,7 @@ import type {
   Guest,
   GuestFormInput,
   GuestRow,
+  GuestStatus,
   InvitationMessageTemplate,
   InvitationMessageTemplateRow,
   InvitationSettings,
@@ -12,6 +13,27 @@ import type {
 import { buildGuestQueryParam } from "@/lib/invitation-utils"
 
 export const AUTH_REQUIRED_ERROR = "AUTH_REQUIRED"
+export type GuestStatusFilter = "all" | GuestStatus
+
+type FetchGuestsPageParams = {
+  userId: string
+  page: number
+  pageSize: number
+  searchQuery?: string
+  status?: GuestStatusFilter
+  guestFrom?: string | null
+}
+
+type GuestsPageResult = {
+  guests: Guest[]
+  totalCount: number
+}
+
+type GuestStats = {
+  total: number
+  sent: number
+  pending: number
+}
 
 const SETTINGS_COLUMNS = "id,user_id,base_url,created_at,updated_at"
 const TEMPLATE_COLUMNS =
@@ -102,6 +124,10 @@ function normalizeTemplateInput(templates: InvitationSettings["templates"]) {
   return normalizedTemplates
 }
 
+function sanitizeSearchTerm(value: string) {
+  return value.trim().replace(/[(),]/g, " ").replace(/\s+/g, " ")
+}
+
 function mapInvitationSettings(
   row: Pick<InvitationSettingsRow, "base_url">,
   templates: InvitationMessageTemplate[]
@@ -120,7 +146,7 @@ function normalizeGuestFormValues(values: GuestFormInput, usedQueryParams?: Set<
   if (usedQueryParams) {
     let suffix = 2
     while (usedQueryParams.has(queryParam)) {
-      queryParam = `${baseQueryParam}-${suffix}`
+      queryParam = `${baseQueryParam}+${suffix}`
       suffix += 1
     }
     usedQueryParams.add(queryParam)
@@ -339,6 +365,94 @@ export async function fetchGuests(supabase: SupabaseClient, userId: string): Pro
   if (error) throw error
 
   return (data ?? []).map(mapGuestRow)
+}
+
+export async function fetchGuestsPage(
+  supabase: SupabaseClient,
+  params: FetchGuestsPageParams
+): Promise<GuestsPageResult> {
+  const safePage = Math.max(1, params.page)
+  const safePageSize = Math.min(Math.max(1, params.pageSize), 100)
+  const from = (safePage - 1) * safePageSize
+  const to = from + safePageSize - 1
+  const normalizedSearchTerm = sanitizeSearchTerm(params.searchQuery ?? "")
+  const normalizedGuestFrom = (params.guestFrom ?? "").trim()
+
+  let query = supabase
+    .from("guests")
+    .select(GUEST_COLUMNS, { count: "exact" })
+    .eq("user_id", params.userId)
+
+  if (params.status && params.status !== "all") {
+    query = query.eq("status", params.status)
+  }
+
+  if (normalizedGuestFrom) {
+    query = query.eq("guest_from", normalizedGuestFrom)
+  }
+
+  if (normalizedSearchTerm) {
+    const pattern = `%${normalizedSearchTerm}%`
+    query = query.or(
+      `name.ilike.${pattern},phone.ilike.${pattern},guest_from.ilike.${pattern},query_param.ilike.${pattern}`
+    )
+  }
+
+  const { data, error, count } = await query
+    .order("created_at", { ascending: false })
+    .range(from, to)
+    .returns<GuestRow[]>()
+
+  if (error) throw error
+
+  return {
+    guests: (data ?? []).map(mapGuestRow),
+    totalCount: count ?? 0,
+  }
+}
+
+export async function fetchGuestStats(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<GuestStats> {
+  const [totalResult, sentResult] = await Promise.all([
+    supabase.from("guests").select("id", { count: "exact", head: true }).eq("user_id", userId),
+    supabase
+      .from("guests")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("status", "sent"),
+  ])
+
+  if (totalResult.error) throw totalResult.error
+  if (sentResult.error) throw sentResult.error
+
+  const total = totalResult.count ?? 0
+  const sent = sentResult.count ?? 0
+
+  return {
+    total,
+    sent,
+    pending: Math.max(total - sent, 0),
+  }
+}
+
+export async function fetchGuestFromOptions(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("guests")
+    .select("guest_from")
+    .eq("user_id", userId)
+    .order("guest_from", { ascending: true })
+    .returns<Array<Pick<GuestRow, "guest_from">>>()
+
+  if (error) throw error
+
+  return Array.from(
+    new Set((data ?? []).map((row) => row.guest_from.trim()).filter(Boolean))
+  )
 }
 
 export async function createGuest(
