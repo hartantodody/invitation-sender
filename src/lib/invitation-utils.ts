@@ -14,9 +14,9 @@ export function buildGuestQueryParam(name: string): string {
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-zA-Z0-9\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
+    .replace(/[-\s]+/g, "+")
+    .replace(/\++/g, "+")
+    .replace(/^\+|\+$/g, "")
 }
 
 export function buildInvitationUrl(
@@ -27,20 +27,25 @@ export function buildInvitationUrl(
 ): string {
   const trimmedBaseUrl = baseUrl.trim()
   const trimmedQueryParam = queryParam.trim()
+  const normalizedQueryParam = trimmedQueryParam
+    .replace(/-/g, " ")
+    .replace(/\+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
 
   if (!trimmedBaseUrl) return ""
-  if (!trimmedQueryParam) return trimmedBaseUrl
+  if (!normalizedQueryParam) return trimmedBaseUrl
 
   try {
     const url = new URL(trimmedBaseUrl)
     url.searchParams.set("lang", language)
-    url.searchParams.set("to", trimmedQueryParam)
+    url.searchParams.set("to", normalizedQueryParam)
     url.searchParams.set("shift", shift)
     return url.toString()
   } catch {
     const params = new URLSearchParams({
       lang: language,
-      to: trimmedQueryParam,
+      to: normalizedQueryParam,
       shift,
     })
     const separator = trimmedBaseUrl.includes("?") ? "&" : "?"
