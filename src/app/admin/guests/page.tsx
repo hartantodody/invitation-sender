@@ -6,8 +6,10 @@ import {
   Edit3Icon,
   FileSpreadsheetIcon,
   InboxIcon,
+  ListFilterIcon,
   Loader2Icon,
   PlusIcon,
+  RotateCcwIcon,
   Trash2Icon,
   UsersRoundIcon,
 } from "lucide-react"
@@ -31,6 +33,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   Table,
   TableBody,
   TableCell,
@@ -38,7 +48,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { getGuestShiftLabel } from "@/lib/guest-shift"
+import { getGuestShiftLabel, guestShiftOptions } from "@/lib/guest-shift"
 import { protectedNavItems } from "@/lib/navigation"
 import { createClient } from "@/lib/supabase/client"
 import {
@@ -46,16 +56,21 @@ import {
   createGuest,
   createGuestsBulk,
   deleteGuestById,
+  fetchGuestFromOptions,
   fetchGuestsPage,
   getAuthenticatedUserId,
   updateGuestById,
 } from "@/lib/supabase/data"
 import { hasSupabasePublicEnv, missingSupabaseEnvMessage } from "@/lib/supabase/env"
 import { getSupabaseErrorMessage } from "@/lib/supabase/error"
-import type { Guest, GuestFormInput } from "@/lib/types"
+import type { Guest, GuestFormInput, GuestStatus } from "@/lib/types"
 
 const PAGE_SIZE = 12
 const SEARCH_DEBOUNCE_MS = 350
+const guestStatusFilterOptions: { value: GuestStatus; label: string }[] = [
+  { value: "pending", label: "Belum Terkirim" },
+  { value: "sent", label: "Terkirim" },
+]
 
 function formatSentAt(sentAt: string | null) {
   if (!sentAt) return "-"
@@ -149,6 +164,14 @@ function parseBulkGuestRows(rows: Record<string, unknown>[]) {
   return { validRows, skippedRows }
 }
 
+function toggleValue<T extends string>(current: T[], value: T) {
+  if (current.includes(value)) {
+    return current.filter((item) => item !== value)
+  }
+
+  return [...current, value]
+}
+
 export default function AdminGuestsPage() {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
@@ -156,10 +179,14 @@ export default function AdminGuestsPage() {
 
   const [guests, setGuests] = useState<Guest[]>([])
   const [userId, setUserId] = useState<string | null>(null)
+  const [guestFromOptions, setGuestFromOptions] = useState<string[]>([])
   const [totalGuests, setTotalGuests] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
+  const [statusFilters, setStatusFilters] = useState<GuestStatus[]>([])
+  const [shiftFilters, setShiftFilters] = useState<Guest["shift"][]>([])
+  const [guestFromFilters, setGuestFromFilters] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isBulkImporting, setIsBulkImporting] = useState(false)
@@ -178,6 +205,17 @@ export default function AdminGuestsPage() {
       window.clearTimeout(timerId)
     }
   }, [searchInput])
+
+  const loadGuestFromFilterOptions = useCallback(
+    async (activeUserId?: string) => {
+      const resolvedUserId = activeUserId ?? userId
+      if (!resolvedUserId) return
+
+      const nextGuestFromOptions = await fetchGuestFromOptions(supabase, resolvedUserId)
+      setGuestFromOptions(nextGuestFromOptions)
+    },
+    [supabase, userId]
+  )
 
   const loadGuestsPage = useCallback(
     async (activeUserId?: string, pageOverride?: number) => {
@@ -201,6 +239,9 @@ export default function AdminGuestsPage() {
           page: resolvedPage,
           pageSize: PAGE_SIZE,
           searchQuery,
+          statusIn: statusFilters,
+          shiftIn: shiftFilters,
+          guestFromIn: guestFromFilters,
         })
 
         const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
@@ -223,7 +264,17 @@ export default function AdminGuestsPage() {
         setIsLoading(false)
       }
     },
-    [currentPage, isSupabaseConfigured, router, searchQuery, supabase, userId]
+    [
+      currentPage,
+      guestFromFilters,
+      isSupabaseConfigured,
+      router,
+      searchQuery,
+      shiftFilters,
+      statusFilters,
+      supabase,
+      userId,
+    ]
   )
 
   const initializePage = useCallback(async () => {
@@ -238,7 +289,9 @@ export default function AdminGuestsPage() {
 
     try {
       const nextUserId = await getAuthenticatedUserId(supabase)
+      const nextGuestFromOptions = await fetchGuestFromOptions(supabase, nextUserId)
       setUserId(nextUserId)
+      setGuestFromOptions(nextGuestFromOptions)
     } catch (error) {
       if (error instanceof Error && error.message === AUTH_REQUIRED_ERROR) {
         router.replace("/login")
@@ -257,7 +310,7 @@ export default function AdminGuestsPage() {
   useEffect(() => {
     if (!userId) return
     void loadGuestsPage(userId)
-  }, [currentPage, loadGuestsPage, searchQuery, userId])
+  }, [currentPage, guestFromFilters, loadGuestsPage, searchQuery, shiftFilters, statusFilters, userId])
 
   const openAddDialog = () => {
     setEditingGuest(null)
@@ -283,12 +336,12 @@ export default function AdminGuestsPage() {
       if (editingGuest) {
         await updateGuestById(supabase, userId, editingGuest.id, values)
         toast.success("Data tamu berhasil diperbarui")
-        await loadGuestsPage(userId)
+        await Promise.all([loadGuestsPage(userId), loadGuestFromFilterOptions(userId)])
       } else {
         await createGuest(supabase, userId, values)
         toast.success("Tamu berhasil ditambahkan")
         setCurrentPage(1)
-        await loadGuestsPage(userId, 1)
+        await Promise.all([loadGuestsPage(userId, 1), loadGuestFromFilterOptions(userId)])
       }
 
       closeDialog()
@@ -311,7 +364,7 @@ export default function AdminGuestsPage() {
     try {
       await deleteGuestById(supabase, userId, guest.id)
       toast.success("Tamu berhasil dihapus")
-      await loadGuestsPage(userId)
+      await Promise.all([loadGuestsPage(userId), loadGuestFromFilterOptions(userId)])
     } catch (error) {
       const message = error instanceof Error ? error.message : "Tamu belum bisa dihapus."
       toast.error(message)
@@ -366,7 +419,7 @@ export default function AdminGuestsPage() {
       }
 
       setCurrentPage(1)
-      await loadGuestsPage(userId, 1)
+      await Promise.all([loadGuestsPage(userId, 1), loadGuestFromFilterOptions(userId)])
     } catch (error) {
       const message = error instanceof Error ? error.message : "Import Excel gagal diproses."
       toast.error(message)
@@ -376,6 +429,25 @@ export default function AdminGuestsPage() {
   }
 
   const hasSearch = Boolean(searchQuery)
+  const hasActiveFilters =
+    statusFilters.length > 0 || shiftFilters.length > 0 || guestFromFilters.length > 0
+  const hasSearchOrFilters = hasSearch || hasActiveFilters
+
+  const resetSearchAndFilters = () => {
+    setSearchInput("")
+    setSearchQuery("")
+    setStatusFilters([])
+    setShiftFilters([])
+    setGuestFromFilters([])
+    setCurrentPage(1)
+  }
+
+  const resetOnlyFilters = () => {
+    setStatusFilters([])
+    setShiftFilters([])
+    setGuestFromFilters([])
+    setCurrentPage(1)
+  }
 
   return (
     <AppShell size="xl">
@@ -423,6 +495,97 @@ export default function AdminGuestsPage() {
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="h-10 rounded-xl bg-white">
+                <ListFilterIcon className="size-4" />
+                Status: {statusFilters.length === 0 ? "Semua" : `${statusFilters.length} dipilih`}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-64">
+              <DropdownMenuLabel>Filter Status</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {guestStatusFilterOptions.map((option) => (
+                <DropdownMenuCheckboxItem
+                  key={option.value}
+                  checked={statusFilters.includes(option.value)}
+                  onCheckedChange={() => {
+                    setStatusFilters((current) => toggleValue(current, option.value))
+                    setCurrentPage(1)
+                  }}
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  {option.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="h-10 rounded-xl bg-white">
+                <ListFilterIcon className="size-4" />
+                Shift: {shiftFilters.length === 0 ? "Semua" : `${shiftFilters.length} dipilih`}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-72">
+              <DropdownMenuLabel>Filter Shift</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {guestShiftOptions.map((option) => (
+                <DropdownMenuCheckboxItem
+                  key={option.value}
+                  checked={shiftFilters.includes(option.value)}
+                  onCheckedChange={() => {
+                    setShiftFilters((current) => toggleValue(current, option.value))
+                    setCurrentPage(1)
+                  }}
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  {option.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="h-10 rounded-xl bg-white">
+                <ListFilterIcon className="size-4" />
+                Guest Dari: {guestFromFilters.length === 0 ? "Semua" : `${guestFromFilters.length} dipilih`}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-72">
+              <DropdownMenuLabel>Filter Guest Dari</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {guestFromOptions.length > 0 ? (
+                guestFromOptions.map((guestFrom) => (
+                  <DropdownMenuCheckboxItem
+                    key={guestFrom}
+                    checked={guestFromFilters.includes(guestFrom)}
+                    onCheckedChange={() => {
+                      setGuestFromFilters((current) => toggleValue(current, guestFrom))
+                      setCurrentPage(1)
+                    }}
+                    onSelect={(event) => event.preventDefault()}
+                  >
+                    {guestFrom}
+                  </DropdownMenuCheckboxItem>
+                ))
+              ) : (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">Belum ada opsi guest dari.</p>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {hasActiveFilters ? (
+            <Button variant="ghost" className="h-10 rounded-xl" onClick={resetOnlyFilters}>
+              <RotateCcwIcon className="size-4" />
+              Reset Filter
+            </Button>
+          ) : null}
+        </div>
+
         <input
           ref={importInputRef}
           type="file"
@@ -457,20 +620,16 @@ export default function AdminGuestsPage() {
         ) : guests.length === 0 ? (
           <EmptyState
             icon={UsersRoundIcon}
-            title={hasSearch ? "Tamu tidak ditemukan" : "Belum ada data tamu"}
+            title={hasSearchOrFilters ? "Tamu tidak ditemukan" : "Belum ada data tamu"}
             description={
-              hasSearch
-                ? "Coba ubah kata kunci pencarian."
+              hasSearchOrFilters
+                ? "Coba ubah kata kunci atau kombinasi filter."
                 : "Mulai dengan menambahkan tamu pertama."
             }
-            actionLabel={hasSearch ? "Reset Pencarian" : "Tambah Tamu"}
+            actionLabel={hasSearchOrFilters ? "Reset Pencarian & Filter" : "Tambah Tamu"}
             onAction={
-              hasSearch
-                ? () => {
-                    setSearchInput("")
-                    setSearchQuery("")
-                    setCurrentPage(1)
-                  }
+              hasSearchOrFilters
+                ? resetSearchAndFilters
                 : openAddDialog
             }
           />

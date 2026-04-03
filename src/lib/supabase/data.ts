@@ -4,6 +4,7 @@ import type {
   Guest,
   GuestFormInput,
   GuestRow,
+  GuestShift,
   GuestStatus,
   InvitationMessageTemplate,
   InvitationMessageTemplateRow,
@@ -21,7 +22,10 @@ type FetchGuestsPageParams = {
   pageSize: number
   searchQuery?: string
   status?: GuestStatusFilter
+  statusIn?: GuestStatus[]
+  shiftIn?: GuestShift[]
   guestFrom?: string | null
+  guestFromIn?: string[]
 }
 
 type GuestsPageResult = {
@@ -376,6 +380,15 @@ export async function fetchGuestsPage(
   const from = (safePage - 1) * safePageSize
   const to = from + safePageSize - 1
   const normalizedSearchTerm = sanitizeSearchTerm(params.searchQuery ?? "")
+  const normalizedStatusIn = Array.from(new Set(params.statusIn ?? [])).filter(
+    (status): status is GuestStatus => status === "pending" || status === "sent"
+  )
+  const normalizedShiftIn = Array.from(new Set(params.shiftIn ?? [])).filter(
+    (shift): shift is GuestShift => shift === "1" || shift === "2" || shift === "3"
+  )
+  const normalizedGuestFromIn = Array.from(
+    new Set((params.guestFromIn ?? []).map((guestFrom) => guestFrom.trim()).filter(Boolean))
+  )
   const normalizedGuestFrom = (params.guestFrom ?? "").trim()
 
   let query = supabase
@@ -383,11 +396,22 @@ export async function fetchGuestsPage(
     .select(GUEST_COLUMNS, { count: "exact" })
     .eq("user_id", params.userId)
 
-  if (params.status && params.status !== "all") {
+  if (normalizedStatusIn.length > 0) {
+    query = query.in("status", normalizedStatusIn)
+  } else if (params.status && params.status !== "all") {
     query = query.eq("status", params.status)
   }
 
-  if (normalizedGuestFrom) {
+  if (normalizedShiftIn.length > 0) {
+    query = query.in(
+      "shift",
+      normalizedShiftIn.map((shift) => Number(shift) as GuestRow["shift"])
+    )
+  }
+
+  if (normalizedGuestFromIn.length > 0) {
+    query = query.in("guest_from", normalizedGuestFromIn)
+  } else if (normalizedGuestFrom) {
     query = query.eq("guest_from", normalizedGuestFrom)
   }
 
