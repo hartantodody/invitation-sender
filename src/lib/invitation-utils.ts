@@ -11,6 +11,7 @@ function normalizeInvitationText(text: string) {
 export function buildGuestQueryParam(name: string): string {
   return name
     .trim()
+    .replace(/&/g, " dan ")
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-zA-Z0-9\s-]/g, "")
